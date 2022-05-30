@@ -1,0 +1,413 @@
+---
+title: 'ST 595'
+author: "Alex Kretschmer, Ruslan Mamedov"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+subtitle: 'Project 3'
+---
+
+```{r setup, include=FALSE}
+library(astsa)
+library(TSA)
+library(ggplot2)
+library(ggfortify)
+library(forecast)
+library(ggthemes)
+knitr::opts_chunk$set(echo = T, warning = F, message = F, fig.align = "center")
+```
+# Introduction
+
+# Methods and Results
+
+
+
+1. Exploratory analysis, simple plots showing overall dataset, trend, seasonality
+
+```{r}
+data(salmon)
+salmon_test<-ts(salmon[143:166], start = c(2015,7), frequency = 12)
+salmon_train<-ts(salmon[1:142], start = c(2003,9), frequency = 12)
+```
+
+```{r exploratory}
+head(salmon_train)
+#plot
+autoplot(salmon_train)+ geom_line( color="#F8766D")+xlab("Year")+ ylab("Price per kg (US dollars)")+ggtitle("Farm-Bred Norwegian Salmon Export Price")+theme_economist(base_size = 8)
+```
+
+```{r seasonal plot}
+#install.packages("fpp2")
+library(fpp2)
+ggseasonplot(salmon_train, year.labels=TRUE, year.labels.left=TRUE) +
+  ylab("price per kg (US dollars)") + geom_smooth() +
+  ggtitle("Farm-Bred Norwegian Salmon export price, Sept. 2003 to June 2015")
+
+```
+
+```{r seasonal plot 2}
+fit = stl(salmon, s.window=12) 
+plot(fit)
+```
+
+```{r trend plot}
+library(TTR)
+salmon_ts_SMA3 <- SMA(salmon_train,n=3)
+plot.ts(salmon_ts_SMA3)
+
+salmon_ts_SMA12 <- SMA(salmon_train,n=12)
+plot.ts(salmon_ts_SMA12, xlab  =  "Year",  ylab  =  "price per kg (US dollars)", 
+main  =  "12 Month Moving Average, Farm-Bred Norwegian Salmon export price")
+```
+
+```{r remove trend and seasonality}
+plot(salmon_train, xlab = "Year", ylab = "price per kg (US dollars)")
+
+salmon_ts_log <- log(salmon_train)
+plot(salmon_ts_log, xlab = "Year", ylab = "log(price per kg (US dollars))")
+```
+
+```{r decomposition}
+salmon_ts_components <- decompose(salmon_train)
+plot(salmon_ts_components)
+```
+
+```{r residuals}
+res <- residuals(naive(salmon_train))
+autoplot(res) + xlab("Year") + ylab("") +
+  ggtitle("Residuals from Naïve Method")+ geom_line( color="#F8766D")+theme_economist(base_size = 8)
+
+gghistogram(res) + ggtitle("Histogram of residuals")
+
+checkresiduals(salmon_train, lag, df = NULL, plot = TRUE)
+```
+The residuals from the naive method show stationarity though with an increase in variance as time progresses.
+
+
+
+
+2. Testing ARMA models and showing ACF and PACF plots to determine which ARMA models may be appropriate.
+
+```{r acf and pacf}
+#acf and pacf plots
+acf(salmon_train)
+pacf(salmon_train)
+
+#log acf and pacf plots
+acf(salmon_ts_log)
+pacf(salmon_ts_log)
+
+```
+The ACF plots show geometric decay as they move slowly toward zero.
+The PACF plots show a significant lag at lag 1. An appropriate ARMA model may be to use an AR(1) model. 
+
+````{r ARMA Models}
+sarima(salmon_train, 1, 0, 0)
+
+AR1 <- arima(salmon_train, order = c(1,0,0))
+print(AR1)
+
+ts.plot(salmon_train, main = 'Monthly Salmon Prices with Predicted')
+AR_fit = salmon_train - residuals(AR1)
+points(AR_fit, type = 'l', col = "indianred", lty = 2)
+```
+```{r ARMA Model predict}
+period_predict <- 24
+
+ts.plot(salmon_train, xlim = c(2010,2020))
+AR_forecast <- predict(AR1, n.ahead = period_predict)$pred
+AR_forecast_se <- predict(AR1, n.ahead = period_predict)$se
+points(AR_forecast, type = 'l', col = 2)
+points(salmon_test, type = 'l', col = 4)
+points(AR_forecast - 2*AR_forecast_se, type = 'l', col = 2, lty = 2)
+points(AR_forecast + 2*AR_forecast_se, type = 'l', col = 2, lty = 2)
+
+```
+3. Testing various ARIMA models and comparing AIC and examining residuals/doing diagnostics
+
+
+```{r ARIMA Model}
+period_predict <- 24
+
+#salmon_train_sub <- subset(salmon_train, salmon_train[["Year"]] > 2003)
+#first difference of original data
+diff_salmon <- diff(salmon_train)
+diff_salmon <- ts(diff_salmon, start = c(2003), deltat = 1)
+plot(diff_salmon, xlab = "Year", ylab = "First order differenced series")
+
+#sample ACF and PACF plots of the original series
+acf(salmon_train, lag.max = 360, na.action = na.pass,
+main = "ACF for original series")
+
+pacf(salmon_train, lag.max = 360, na.action = na.pass,
+main = "PACF for original series")
+
+#max lag at 50 to discern where the p significant lag is
+pacf(salmon_train, lag.max = 50, na.action = na.pass,
+main = "PACF for original series (lag max = 50")
+
+#sample ACF and PACF plots of the first difference original series
+acf(diff_salmon, lag.max = 50, na.action = na.pass,
+main = "ACF for differenced series")
+
+pacf(diff_salmon, lag.max = 50, na.action = na.pass,
+main = "PACF for differenced series")
+
+#various Arima models
+n <- length(diff_salmon)
+
+(fit.2_1 <- arima(salmon_train, order=c(2,1,1)))
+(fit.1_2 <- arima(salmon_train, order=c(1,1,2)))
+(fit.2_2 <- arima(salmon_train, order=c(2,1,2)))
+(fit.3_2 <- arima(salmon_train, order=c(3,1,2)))
+(fit.2_3 <- arima(salmon_train, order=c(2,1,3)))
+(fit.3_3 <- arima(salmon_train, order=c(3,1,3)))
+(fit.4_3 <- arima(salmon_train, order=c(4,1,3)))
+(fit.3_4 <- arima(salmon_train, order=c(3,1,4)))
+(fit.4_4 <- arima(salmon_train, order=c(4,1,4)))
+(fit.5_4 <- arima(salmon_train, order=c(5,1,4)))
+(fit.4_5 <- arima(salmon_train, order=c(4,1,5)))
+(fit.5_5 <- arima(salmon_train, order=c(5,1,5)))
+
+
+
+```
+
+```{r arima diagnostics}
+par(mfrow = c(1, 2))
+res <- fit.5_5$residuals
+acf(res, lag.max = 20)+ geom_line( color="#F8766D")+theme_economist(base_size = 8)
+pacf(res, lag.max = 20)
+tsdiag(fit.5_5)
+qqnorm(res)
+qqline(res)
+checkresiduals(fit.5_5)
+#autoplot(forecast(fit.5_5))
+```
+
+```{r arima forecast}
+pred <- predict(fit.5_5, n.ahead = 24)
+
+ts.plot(salmon_train, xlim = c(2003, 2020), ylim = c(0,10),
+ylab = "Salmon Price in kg (US dollars)", main = "Forecast from ARIMA Model")
+ARIMA_forecast <- predict(fit.5_5, n.ahead = period_predict)$pred
+ARIMA_forecast_se <- predict(fit.5_5, n.ahead = period_predict)$se
+points(ARIMA_forecast, type = 'l', col = 2)
+points(salmon_test, type = 'l', col = 4)
+points(ARIMA_forecast - 2*ARIMA_forecast_se, type = 'l', col = 2, lty = 2)
+points(ARIMA_forecast + 2*ARIMA_forecast_se, type = 'l', col = 2, lty = 2)
+```
+
+
+3. Testing various SARIMA models and comparing AIC and examining residuals/doing diagnostics.
+
+*Although the best-fit ARIMA model above does capture the main patters in predicted series, it might me quite challenging for interpretation due to high order parameters (p=5, q=5). Hence we try applying SARIMA method to see if capturing the trend and seasonality patterns can provide a simpler model having a comparable accuracy.*   
+
+*First, let's difference the trend.*  
+
+```{r}
+salmon_ts_log.diff<-diff(salmon_ts_log, lag = 1)
+salmon_ts_log.diff <- ts(salmon_ts_log.diff, start = c(2003,9), deltat = 1/12)
+plot(salmon_ts_log.diff, xlim = c(2004, 2017), ylim = c(-0.4, 0.4), xlab = "Year", ylab = "Differenced log(price per kg (US dollars))",
+main  =  "Farm-Bred Norwegian Salmon, export price from Sep. 2003 to Jun. 2015")
+```
+
+*Although the series looks pretty stationary, let's do some frequency domain analysis for the seasonality patterns:*    
+
+```{r}
+per.mod1<-periodogram(salmon_ts_log, log = 'no', xlim = c(0, 0.5))
+```
+
+*There's a definitive frequencies peak around 0.081 (period = 1/0.083 = 12 months = 1 year) as well as 0.020833333 (period = 1/0.020833333 = 48 months = 4 years). We will not work with larger periods as there's not enough data to deal with it.*    
+    
+
+```{r}
+salmon_ts_log.diff<-c(NA, diff(salmon_ts_log.diff, lag = 12))
+salmon_ts_log.diff <- ts(salmon_ts_log.diff, start = c(2003,9), deltat = 1/12)
+plot(salmon_ts_log.diff, xlim = c(2004, 2017), ylim = c(-0.4, 0.4), xlab = "Year", ylab = "Differenced log(price per kg (US dollars))",
+main  =  "Farm-Bred Norwegian Salmon, export price from Sep. 2003 to Jun. 2015")
+```
+*Now the series look much more stationary. Let's calculate ACF/PACF of the differenced series:*  
+
+```{r}
+par(mfrow = c(1, 2))
+acf(salmon_ts_log.diff, main = "ACF for differenced series", na.action = na.pass,lag.max=70)
+pacf(salmon_ts_log.diff, main = "PACF for differenced series", na.action = na.pass, lag.max=70)
+```
+*We'd like to difference the trend and possibly the seasonality so d = 1 and D=0 or D = 1 with periods = 12 or 48.*    
+
+*To determine the AR and MA orders, we first decide on P and Q for the seasonal part, then p and q for the non-seasonal part.*  
+
+*The PACF seems to be non-zero at seasonal lags  12 months, suggesting P = 1 with period 12. It's not quite clear whether there is an analogous seasonal lag for ACF (e.g. Q=0 or Q=1).*  
+
+*For the non-seasonal component, both ACF and PACF could be non-zero at lag 1, p is either 1 or 2 and q is either 0 or 1.*    
+
+*Now let's fit multiplicative seasonal ARIMA models to the logged series with periods 12 and 48, and compare them by AIC to see how well the metric would correlate with our ACF/PACF plot interpretations.*   
+
+```{r, warning=FALSE}
+pq.list <- list(list(c(1,1,0), c(1,0,0)), list(c(1,1,0), c(1,1,0)), list(c(2,1,0), c(1,0,0)),list(c(2,1,0), c(1,1,0)), list(c(1,1,1), c(1,0,0)), list(c(2,1,1), c(1,0,0)), list(c(2,1,1), c(1,1,0)), list(c(1,1,0), c(1,0,1)), list(c(1,1,0), c(1,1,1)), list(c(2,1,0), c(1,0,1)), list(c(2,1,0), c(1,1,1)), list(c(1,1,1), c(1,0,1)), list(c(2,1,1), c(1,0,1)),list(c(2,1,1), c(1,1,1))
+)
+min.aic<-0
+pq.values<-c(0,0,0)
+PQ.values<-c(0,0,0)
+period = 0
+for (j in c(12, 24, 48)){
+for (i in pq.list){
+  fit.ARMA<-arima(salmon_ts_log, order = i[[1]],seasonal = list(order = i[[2]] , period = j))
+  cat("pq/PQ coefficients",i[[1]],"and ",i[[2]], " with period", j,"gives sigma^2", round(fit.ARMA$sigma2,7),"and aic",fit.ARMA$aic,"\n")
+  if (fit.ARMA$aic<min.aic){
+    pq.values<-i[[1]]
+    PQ.values<-i[[2]]
+    period = j
+    min.aic=fit.ARMA$aic
+  }
+}
+}
+(fit.ARMA<-arima(salmon_ts_log, order = pq.values, seasonal = list(order = PQ.values , period = period)))
+ cat("pq/PQ coefficients of", pq.values,"and",PQ.values, "with period", period, "gave minimal aic value of",fit.ARMA$aic,"\n")
+```
+
+*The model with lowest AIC value correlates well with what was observed on ACF/PACF plots. It appears that models without seasonal differencing (D=0) give much better aic value (which could be due to the limited amount of data we have, especially for large periods like 4 years).*     
+*Now let's investigate diagnostics for this model, including autocorrelation and normality of the residuals.*  
+
+```{r}
+## Fitting residuals
+par(mfrow = c(1, 2))
+res <- fit.ARMA$residuals
+acf(res, lag.max = 200, main = "Series Residuals")
+pacf(res, lag.max = 200, main = "Series Residuals")
+```
+
+```{r}
+tsdiag(fit.ARMA)
+```
+
+```{r}
+qqnorm(res)
+qqline(res)
+```
+*Overall, the distribution of residual seems to be independent of each other, at least for the middle quantiles. Autocorrelation p-values according to Ljung–Box are mostly above 0.05 (the data points are independently distributed) although some of them are questionable, especially at lag 7.*   
+
+*Now let's produce the forecasts for this series with a lead time of two years:*  
+
+```{r}
+ts.plot(salmon, xlim = c(2010,2018), ylim = c(1,12), xlab  =  "Year",  ylab  =  "price per kg (US dollars)", 
+main  =  "Forecast from SARIMA Model")
+SARIMA_forecast <- predict(fit.ARMA, n.ahead = 24)
+####forecasted values
+points(exp(SARIMA_forecast$pred), col = "red", type = 'l', lty = 2)
+####2 sd forecasting limits
+points(exp(SARIMA_forecast$pred-2*SARIMA_forecast$se),col='green', type = 'l', lty = 2)
+points(exp(SARIMA_forecast$pred+2*SARIMA_forecast$se),col='blue', type = 'l', lty = 2)
+```
+*Interestingly enough, the simpler SARIMA model provides a very similar prediction to ARIMA with high order parameters.*    
+
+
+4. Forecasts from Holt-Winters multiplicative method
+
+```{r}
+#The forecasting with linear trend:
+HW_forecast <- holt(salmon_ts_log, seasonal = "multiplicative", h = 24)
+plot(HW_forecast)
+```
+
+5. Forecasting with ML methods
+
+```{r}
+library(randomForest)
+library(zoo)
+library(lubridate)
+train_month<-month(as.yearmon(time(salmon_train)))
+train_year<-year(as.yearmon(time(salmon_train)))
+test_month<-month(as.yearmon(time(salmon_test)))
+test_year<-year(as.yearmon(time(salmon_test)))
+
+df_train <-as.data.frame(matrix(nrow=length(train_year),ncol=3))
+df_train[1]<-train_month
+df_train[2]<-train_year
+df_train[3]<-salmon_train
+colnames(df_train)<-c("Month", "Year","Price")
+
+df_test <-as.data.frame(matrix(nrow=length(test_year),ncol=2))
+df_test[1]<-test_month
+df_test[2]<-test_year
+colnames(df_test)<-c("Month", "Year")
+
+rf = randomForest(Price ~ Month+Year, data = df_train)
+RF_forecast = predict(rf, newdata = df_test)
+RF_forecast<-ts(RF_forecast, start = c(2015,7), frequency = 12)
+
+ts.plot(salmon, xlim = c(2010,2018), ylim = c(1,12), xlab  =  "Year",  ylab  =  "price per kg (US dollars)", 
+main  =  "Farm-Bred Norwegian Salmon export price, Sept. 2003 to June 2017")
+points(RF_forecast, col = "orange", type = 'l', lty = 2)
+```
+
+```{r}
+library(xgboost)
+
+df_labels <-as.data.frame(matrix(nrow=length(train_year),ncol=1))
+df_labels[1]<-salmon_train
+
+xg = xgboost(data = as.matrix(df_train[1:2]), label = as.matrix(df_train[3]), max.depth = 2, eta = 1, nthread = 2, nrounds = 2)
+XG_forecast = predict(xg, newdata = as.matrix(df_test))
+XG_forecast<-ts(XG_forecast, start = c(2015,7), frequency = 12)
+
+ts.plot(salmon, xlim = c(2010,2018), ylim = c(1,12), xlab  =  "Year",  ylab  =  "price per kg (US dollars)", 
+main  =  "Farm-Bred Norwegian Salmon export price, Sept. 2003 to June 2017")
+points(XG_forecast, col = "purple", type = 'l', lty = 2)
+```
+
+5. Comparing the models.  
+
+```{r}
+ts.plot(salmon_test, main = "Predicted vs. Actual values with different models", ylab = "price per kg (US dollars)", ylim = c(4.5,8.6))
+text(x =2017.3, y = 8.105195, labels = c("Actual Data"))
+
+points(ARIMA_forecast, col = "green", type = 'l', lty = 2)
+text(x =2017.3, y = 6, labels = c("ARIMA method"))
+
+points(exp(SARIMA_forecast$pred), col = "red", type = 'l', lty = 2)
+text(x =2017.25, y = 5.382934, labels = c("SARIMA method"))
+
+points(exp(HW_forecast$mean), col = "blue", type = 'l', lty = 2)
+text(x =2017.3, y = 5.698073, labels = c("HW Method"))
+
+#points(RF_forecast, col = "orange", type = 'l', lty = 2)
+#text(x =2017.3, y = 6, labels = c("Random Forest"))
+
+points(XG_forecast, col = "purple", type = 'l', lty = 2)
+text(x =2017.3, y = 6.7, labels = c("XGBoost"))
+
+```
+
+
+
+```{r}
+library(kableExtra)
+models<-c( exp(SARIMA_forecast$pred), exp(HW_forecast$mean), RF_forecast)
+
+mspe<-function (x, y) mean((y - x)^2)
+rsq <- function (x, y) cor(x, y) ^ 2
+
+models.names<-c("ARIMA","SARIMA","Holt-Winters multiplicative method", "XGBoost")
+mspe.models<-c( mspe(ARIMA_forecast, salmon_test), mspe(exp(SARIMA_forecast$pred), salmon_test), mspe(exp(HW_forecast$mean), salmon_test), mspe(XG_forecast, salmon_test))
+rsq.models<-c(rsq(ARIMA_forecast, salmon_test),rsq(exp(SARIMA_forecast$pred), salmon_test),rsq(exp(HW_forecast$mean), salmon_test), rsq(XG_forecast, salmon_test))
+
+models.comparison <- data.frame(models.names, mspe.models, rsq.models)
+colnames(models.comparison)<- c("Model Names","Mean squared prediction error", "R-squared")
+
+(models.comparison)
+
+kable(models.comparison, format="latex", booktabs=TRUE) %>%
+kable_styling(latex_options="scale_down")
+```
+
+# Discussion
+
+
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
